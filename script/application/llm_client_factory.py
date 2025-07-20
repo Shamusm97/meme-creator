@@ -1,8 +1,8 @@
 import os
-from typing import Dict, Type
 
-from google.genai.types import GenerateContentConfig, ThinkingConfig
-from script.domain.models import LLMClient, LLMConfig
+from google.genai.types import ThinkingConfig
+from script.domain.models import LLMClient
+from config.domain.models import LLMConfig
 from script.infrastructure.gemini_client import GeminiConfig, GeminiLLMClient
 
 

@@ -8,20 +8,18 @@ if __name__ == "__main__":
     load_dotenv()
 
     peter = Character(
-        name="Peter Griffin",
+        name="Peter",
         speaking_style="casual",
         conversational_role="answerer",
     )
 
     stewie = Character(
-        name="Stewie Griffin",
+        name="Stewie",
         speaking_style="sarcastic",
         conversational_role="questioner",
     )
 
     script_config = ScriptConfig(
-        system_prompt="You are a character in a Family Guy episode. Respond in character.",
-        user_prompt="Peter, what do you think about Stewie's latest invention?",
         overall_conversation_style="humorous",
         main_topic="Family Guy Episode Dialogue",
         scenario="A typical Family Guy scene where Peter and Stewie are discussing a new invention.",
@@ -51,6 +49,11 @@ if __name__ == "__main__":
     )
 
     client = GeminiLLMClient(
-        gemini_config=llmconfig,
+        gemini_config=Geminiconfig,
         api_key=None,  # Assuming the API key is set in the environment
     )
+
+    script = client.generate_script(script_config)
+    print("Generated Script:")
+    for entry in script:
+        print(f"{entry.character.name}: {entry.content}")

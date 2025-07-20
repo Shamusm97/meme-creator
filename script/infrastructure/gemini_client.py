@@ -3,7 +3,7 @@ from google.genai import types
 from typing import List, Optional
 from dataclasses import dataclass
 
-from config.domain.models import ScriptConfig
+from config.domain.models import ScriptConfig, Character
 from script.domain.models import LLMClient, ScriptEntry
 
 
@@ -65,8 +65,8 @@ class GeminiLLMClient(LLMClient):
 
             print("=== SCRIPT GENERATED ===")
 
-            script = response.text.strip()
-            parsed_script = self.parse_script(script)
+            raw_script_content = response.text.strip()
+            parsed_script = self.parse_script_with_characters(characters=script_config.characters, script=raw_script_content)
             print(f"Parsed {len(parsed_script)} entries from generated script.")
 
             return parsed_script
@@ -91,7 +91,7 @@ class GeminiLLMClient(LLMClient):
                 errors.append(f"Line {i}: Missing colon - '{line.strip()}'")
         return errors
 
-    def parse_script(self, script: str) -> List[ScriptEntry]:
+    def parse_script_with_characters(self, characters: List[Character], script: str) -> List[ScriptEntry]:
         """Parse script into structured data"""
         # Validate first
         errors = self.validate_script(script)
@@ -102,10 +102,23 @@ class GeminiLLMClient(LLMClient):
         script_entries = []
         for line in script.split("\n"):
             if ":" in line:
-                character, dialogue = line.split(":", 1)
-                script_entries.append(
-                    ScriptEntry(character=character.strip(), dialogue=dialogue.strip())
-                )
+                character_name, content = line.split(":", 1)
+                print(f"Processing character: {character_name.strip()} with content: {content.strip()}")
+                for character in characters:
+                    if character.name.lower() == character_name.strip().lower():
+                        # Match found, create ScriptEntry
+                        script_entries.append(
+                            ScriptEntry(character=character, content=content.strip())
+                        )
+                        break
+                else:
+                    # No match found, create a generic ScriptEntry
+                    script_entries.append(
+                        ScriptEntry(character=Character(name=character_name.strip()), content=content.strip())
+                    )
+
+        if not script_entries:
+            raise ValueError("No valid script entries found after parsing.")
 
         return script_entries
 
