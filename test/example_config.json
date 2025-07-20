@@ -1,0 +1,63 @@
+{
+  "project_name": "Family Guy Meme Creator",
+  "base_output_dir": "output",
+  "characters": [
+    {
+      "name": "Peter",
+      "speaking_style": "casual",
+      "conversational_role": "answerer",
+      "image_path": "assets/peter.png",
+      "tts_voice_clone": "peter.mp3",
+      "tts_voice_predefined": "",
+      "tts_voice_profile": "EXPRESSIVE_MONOLOGUE"
+    },
+    {
+      "name": "Stewie",
+      "speaking_style": "sarcastic",
+      "conversational_role": "questioner",
+      "image_path": "assets/stewie.png",
+      "tts_voice_clone": "stewie.mp3",
+      "tts_voice_predefined": "",
+      "tts_voice_profile": "EXPRESSIVE_MONOLOGUE"
+    }
+  ],
+  "script": {
+    "overall_conversation_style": "humorous",
+    "main_topic": "Family Guy Episode Dialogue",
+    "scenario": "A typical Family Guy scene where Peter and Stewie are discussing a new invention.",
+    "dialogue_length": "5-7 lines",
+    "system_prompt_extra": "",
+    "user_prompt_extra": "",
+    "llm": {
+      "provider": "gemini",
+      "api_key": "",
+      "gemini": {
+        "temperature": 0.7,
+        "max_output_tokens": 1024,
+        "model": "gemini-2.5-flash",
+        "direct_output": false,
+        "thinking_config": {
+          "include_thoughts": false,
+          "thinking_budget": 0
+        }
+      }
+    }
+  },
+  "tts": {
+    "provider": "chatterbox",
+    "chatterbox": {
+      "base_url": "http://192.168.1.100:8004",
+      "endpoint": "/tts",
+      "timeout": 120
+    }
+  },
+  "video": {
+    "provider": "moviepy",
+    "background_video": "assets/background.mp4",
+    "moviepy": {
+      "quality": "medium",
+      "fps": 30,
+      "codec": "libx264"
+    }
+  }
+}

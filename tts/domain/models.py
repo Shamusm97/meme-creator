@@ -1,224 +1,156 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Union, Tuple
-import requests
+from typing import List, Optional
+from enum import Enum
+
+from config.domain.models import Character
 
 
 @dataclass
-class ChatterboxVoiceProfile:
-    """Represents a voice profile for Chatterbox TTS API."""
+class VoiceProfile:
+    """Represents a voice profile configuration."""
 
-    temperature: float
-    exaggeration: float
-    cfg_weight: float
-    seed: int
-    speed_factor: float
-    language: str
+    temperature: float = field(default=0.8)
+    exaggeration: float = field(default=0.5)
+    cfg_weight: float = field(default=0.5)
+    seed: int = field(default=0)
+    speed_factor: float = field(default=1.0)
+    language: str = field(default="en")
+
+    def __post_init__(self):
+        if not 0 <= self.temperature <= 2:
+            raise ValueError("Temperature must be between 0 and 2")
+        if not 0 <= self.exaggeration <= 2:
+            raise ValueError("Exaggeration must be between 0 and 2")
+        if not 0 <= self.cfg_weight <= 1:
+            raise ValueError("CFG weight must be between 0 and 1")
+        if self.seed < 0:
+            raise ValueError("Seed must be non-negative")
+        if self.speed_factor <= 0:
+            raise ValueError("Speed factor must be positive")
 
 
-class TTSClient(ABC):
-    """Abstract base class for TTS clients."""
+class VoiceMode(Enum):
+    """Voice synthesis modes."""
+
+    PREDEFINED = "predefined"
+    CLONE = "clone"
+
+
+class OutputFormat(Enum):
+    """Audio output formats."""
+
+    WAV = "wav"
+    OPUS = "opus"
+
+
+@dataclass
+class TTSRequest:
+    """Domain model for text-to-speech requests."""
+
+    text: str
+    character: Character
+    voice_mode: VoiceMode = field(default=VoiceMode.PREDEFINED)
+    predefined_voice_id: Optional[str] = field(default=None)
+    reference_audio_filename: Optional[str] = field(default=None)
+    output_format: OutputFormat = field(default=OutputFormat.WAV)
+    split_text: bool = field(default=True)
+    chunk_size: int = field(default=120)
+    voice_profile: Optional[VoiceProfile] = field(default=None)
+
+    def __post_init__(self):
+        if not self.text.strip():
+            raise ValueError("Text cannot be empty")
+
+        if self.voice_mode == VoiceMode.PREDEFINED and not self.predefined_voice_id:
+            raise ValueError(
+                "predefined_voice_id is required when voice_mode is 'predefined'"
+            )
+
+        if self.voice_mode == VoiceMode.CLONE and not self.reference_audio_filename:
+            raise ValueError(
+                "reference_audio_filename is required when voice_mode is 'clone'"
+            )
+
+        if self.chunk_size <= 0:
+            raise ValueError("Chunk size must be positive")
+
+
+@dataclass
+class AudioFile:
+    """Domain model representing an audio file."""
+
+    path: Path
+    character: Character
+    dialogue: str
+    duration_seconds: Optional[float] = field(default=None)
+    file_size_bytes: Optional[int] = field(default=None)
+
+    def __post_init__(self):
+        if not self.path.exists():
+            raise ValueError(f"Audio file does not exist: {self.path}")
+        if not self.dialogue.strip():
+            raise ValueError("Dialogue cannot be empty")
+
+
+@dataclass
+class AudioScript:
+    """Domain model for a complete speech script with timing."""
+
+    audio_files: List[AudioFile] = field(default_factory=list)
+    total_duration_seconds: float = field(default=0.0)
+
+    def add_audio_file(self, audio_file: AudioFile) -> None:
+        """Add an audio file to the script."""
+        self.audio_files.append(audio_file)
+        if audio_file.duration_seconds:
+            self.total_duration_seconds += audio_file.duration_seconds
+
+    def get_characters(self) -> List[Character]:
+        """Get unique characters in the script."""
+        seen_names = set()
+        unique_characters = []
+        for af in self.audio_files:
+            if af.character.name not in seen_names:
+                seen_names.add(af.character.name)
+                unique_characters.append(af.character)
+        return unique_characters
+
+    def get_files_by_character(self, character: Character) -> List[AudioFile]:
+        """Get all audio files for a specific character."""
+        return [af for af in self.audio_files if af.character == character]
+
+
+class TTSService(ABC):
+    """Abstract domain service for text-to-speech operations."""
 
     @abstractmethod
-    def synthesize_to_stream(self, request: TTSRequest) -> requests.Response:
+    def synthesize(self, request: TTSRequest, output_dir: Path) -> AudioFile:
         """
-        Synthesize text to speech and return streaming response.
+        Synthesize speech for a single request.
 
         Args:
-            request: TTS request configuration
+            request: TTS request with text and configuration
+            output_dir: Where to save the audio file
 
         Returns:
-            Streaming response object
+            Result of the synthesis operation
         """
         pass
 
     @abstractmethod
-    def save_stream_to_file(
-        self, response: requests.Response, output_path: Union[str, Path]
-    ) -> Dict[str, Any]:
+    def synthesize_script(
+        self, requests: List[TTSRequest], output_dir: Path
+    ) -> AudioScript:
         """
-        Save streaming response to file.
+        Synthesize speech for multiple requests (complete script).
 
         Args:
-            response: Streaming response from synthesize_to_stream()
-            output_path: Path where to save the audio file
-
-        Returns:
-            Dictionary with save info
-        """
-        pass
-
-    @abstractmethod
-    def synthesize_to_file(
-        self, request: TTSRequest, output_path: Union[str, Path]
-    ) -> Dict[str, Any]:
-        """
-        Synthesize text to speech and save to file.
-
-        Args:
-            request: TTS request configuration
-            output_path: Path where to save the audio file
-
-        Returns:
-            Dictionary with synthesis info
-        """
-        pass
-
-    @abstractmethod
-    def synthesize_batch(
-        self,
-        texts: List[str],
-        output_dir: Union[str, Path],
-        base_config: TTSRequest,
-        filename_prefix: str = "speech",
-    ) -> List[Dict[str, Any]]:
-        """
-        Synthesize multiple texts to separate files.
-
-        Args:
-            texts: List of texts to synthesize
+            requests: List of TTS requests
             output_dir: Directory to save audio files
-            base_config: Base TTS configuration
-            filename_prefix: Prefix for generated filenames
 
         Returns:
-            List of synthesis results
+            Complete speech script with audio files
         """
         pass
-
-    @abstractmethod
-    def get_reference_files(self) -> Dict[str, Any]:
-        """
-        Get list of available reference audio files.
-
-        Returns:
-            Dictionary with reference files info or error
-        """
-        pass
-
-    @abstractmethod
-    def get_predefined_voices(self) -> Dict[str, Any]:
-        """
-        Get list of available predefined voices.
-
-        Returns:
-            Dictionary with predefined voices info or error
-        """
-        pass
-
-    @abstractmethod
-    def upload_reference_audio(
-        self, file_path: Union[str, Path], force_overwrite: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Upload reference audio file.
-
-        Args:
-            file_path: Path to the audio file to upload
-            force_overwrite: If True, upload even if file already exists
-
-        Returns:
-            Dictionary with upload result
-        """
-        pass
-
-    @abstractmethod
-    def upload_predefined_voice(
-        self, file_path: Union[str, Path], force_overwrite: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Upload predefined voice file.
-
-        Args:
-            file_path: Path to the voice file to upload
-            force_overwrite: If True, upload even if file already exists
-
-        Returns:
-            Dictionary with upload result
-        """
-        pass
-
-    @abstractmethod
-    def batch_upload_reference_files(
-        self, file_paths: List[Union[str, Path]], force_overwrite: bool = False
-    ) -> List[Dict[str, Any]]:
-        """
-        Upload multiple reference audio files.
-
-        Args:
-            file_paths: List of paths to audio files
-            force_overwrite: If True, upload even if files already exist
-
-        Returns:
-            List of upload results for each file
-        """
-        pass
-
-    @abstractmethod
-    def list_available_voices(self) -> Dict[str, Any]:
-        """
-        Get comprehensive list of both predefined voices and reference files.
-
-        Returns:
-            Dictionary with all available voices organized by type
-        """
-        pass
-
-
-class TTSManager(ABC):
-    """Abstract base class for TTS workflow managers."""
-
-    def __init__(self, tts_client: TTSClient):
-        self.tts_client = tts_client
-
-    @abstractmethod
-    def parse_script_lines(self, script: str) -> List[Tuple[str, str]]:
-        """
-        Parse script into (character, dialogue) pairs.
-
-        Args:
-            script: Script text
-
-        Returns:
-            List of (character, dialogue) tuples
-        """
-        pass
-
-    @abstractmethod
-    def generate_speech_files(
-        self,
-        script: str,
-        output_dir: Union[str, Path],
-        voice_mapping: Dict[str, str],
-        base_config: TTSRequest,
-    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """
-        Generate speech files for entire script with character voice mapping.
-
-        Args:
-            script: Script text
-            output_dir: Directory to save audio files
-            voice_mapping: Dict mapping character names to voice IDs
-            base_config: Base TTS configuration
-
-        Returns:
-            Tuple of (synthesis_results, timing_data)
-        """
-        pass
-
-
-# Example concrete implementations would inherit from these ABCs:
-#
-# class ChatterboxTTSRequest(TTSRequest):
-#     def to_dict(self) -> Dict[str, Any]:
-#         # Implementation here
-#         pass
-#
-# class ChatterboxTTSClient(TTSClient):
-#     # All abstract methods implemented
-#     pass
-#
-# class TikTokTTSManager(TTSManager):
-#     # All abstract methods implemented
-#     pass

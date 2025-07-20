@@ -12,6 +12,8 @@ class ScriptEntry:
     content: str
 
 
+
+
 class LLMClient(ABC):
     @abstractmethod
     def generate_script(self, script_config: ScriptConfig) -> List[ScriptEntry]:

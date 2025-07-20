@@ -1,3 +1,5 @@
 .venv/
 .env
 ./flake.lock
+output/
+assets/

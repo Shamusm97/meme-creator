@@ -1,11 +1,18 @@
 from dataclasses import dataclass, asdict
-from typing import Optional, Union
+from typing import Optional, Union, List
 from enum import Enum
 from pathlib import Path
 import time
-import json
 import requests
-from tts.domain.models import ChatterboxVoiceProfile
+
+from config.domain.models import ChatterboxTTSConfig
+from tts.domain.models import (
+    VoiceProfile,
+    TTSRequest,
+    TTSService,
+    AudioFile,
+    AudioScript,
+)
 
 
 class CHATTERBOX_VOICE_PROFILES(Enum):
@@ -13,7 +20,7 @@ class CHATTERBOX_VOICE_PROFILES(Enum):
     Enum for predefined voice profiles used in Chatterbox TTS API.
     """
 
-    STANDARD_NARRATION = ChatterboxVoiceProfile(
+    STANDARD_NARRATION = VoiceProfile(
         temperature=0.8,
         exaggeration=0.4,
         cfg_weight=0.5,
@@ -21,7 +28,7 @@ class CHATTERBOX_VOICE_PROFILES(Enum):
         speed_factor=1.0,
         language="en",
     )
-    EXPRESSIVE_MONOLOGUE = ChatterboxVoiceProfile(
+    EXPRESSIVE_MONOLOGUE = VoiceProfile(
         temperature=0.75,
         exaggeration=1.1,
         cfg_weight=0.6,
@@ -29,7 +36,7 @@ class CHATTERBOX_VOICE_PROFILES(Enum):
         speed_factor=1.0,
         language="en",
     )
-    TECHNICAL_EXPLANATION = ChatterboxVoiceProfile(
+    TECHNICAL_EXPLANATION = VoiceProfile(
         temperature=0.85,
         exaggeration=0.4,
         cfg_weight=0.5,
@@ -37,7 +44,7 @@ class CHATTERBOX_VOICE_PROFILES(Enum):
         speed_factor=1.0,
         language="en",
     )
-    UPBEAT_ADVERTISEMENT = ChatterboxVoiceProfile(
+    UPBEAT_ADVERTISEMENT = VoiceProfile(
         temperature=0.8,
         exaggeration=1.3,
         cfg_weight=0.45,
@@ -45,7 +52,7 @@ class CHATTERBOX_VOICE_PROFILES(Enum):
         speed_factor=1.0,
         language="en",
     )
-    THOUGHTFUL_REFLECTION = ChatterboxVoiceProfile(
+    THOUGHTFUL_REFLECTION = VoiceProfile(
         temperature=0.7,
         exaggeration=0.4,
         cfg_weight=0.6,
@@ -53,7 +60,7 @@ class CHATTERBOX_VOICE_PROFILES(Enum):
         speed_factor=1.0,
         language="en",
     )
-    SIMPLE_PUNCTUATION_TEST = ChatterboxVoiceProfile(
+    SIMPLE_PUNCTUATION_TEST = VoiceProfile(
         temperature=0.8,
         exaggeration=0.5,
         cfg_weight=0.5,
@@ -61,7 +68,7 @@ class CHATTERBOX_VOICE_PROFILES(Enum):
         speed_factor=1.0,
         language="en",
     )
-    LONG_STORY_EXCERPT = ChatterboxVoiceProfile(
+    LONG_STORY_EXCERPT = VoiceProfile(
         temperature=0.78,
         exaggeration=1.1,
         cfg_weight=0.55,
@@ -74,39 +81,34 @@ class CHATTERBOX_VOICE_PROFILES(Enum):
 @dataclass
 class ChatterboxTTSRequest:
     """
-    Request configuration for Chatterbox TTS API.
+    Infrastructure model for Chatterbox TTS API requests.
     """
 
     text: str
-    voice_mode: str = "predefined"  # "predefined" or "clone"
+    voice_mode: str
     predefined_voice_id: Optional[str] = None
     reference_audio_filename: Optional[str] = None
-    output_format: str = "wav"  # "wav" or "opus"
+    output_format: str = "wav"
     split_text: bool = True
     chunk_size: int = 120
-    voice_profile: Optional[ChatterboxVoiceProfile] = None
+    voice_profile: Optional[VoiceProfile] = None
 
-    def __post_init__(self):
-        """Validate the request configuration."""
-        if self.voice_mode not in ["predefined", "clone"]:
-            raise ValueError("voice_mode must be 'predefined' or 'clone'")
-
-        if self.voice_mode == "predefined" and not self.predefined_voice_id:
-            raise ValueError(
-                "predefined_voice_id is required when voice_mode is 'predefined'"
-            )
-
-        if self.voice_mode == "clone" and not self.reference_audio_filename:
-            raise ValueError(
-                "reference_audio_filename is required when voice_mode is 'clone'"
-            )
-
-        if self.output_format not in ["wav", "opus"]:
-            raise ValueError("output_format must be 'wav' or 'opus'")
+    @classmethod
+    def from_domain_request(cls, domain_request: TTSRequest) -> "ChatterboxTTSRequest":
+        """Convert domain TTSRequest to infrastructure request."""
+        return cls(
+            text=domain_request.text,
+            voice_mode=domain_request.voice_mode.value,
+            predefined_voice_id=domain_request.predefined_voice_id,
+            reference_audio_filename=domain_request.reference_audio_filename,
+            output_format=domain_request.output_format.value,
+            split_text=domain_request.split_text,
+            chunk_size=domain_request.chunk_size,
+            voice_profile=domain_request.voice_profile,
+        )
 
     def to_dict(self) -> dict:
-        """Convert to dictionary, flattening voice_profile and excluding None values."""
-        # Start with basic fields
+        """Convert to dictionary for API request."""
         result = {
             "text": self.text,
             "voice_mode": self.voice_mode,
@@ -115,16 +117,13 @@ class ChatterboxTTSRequest:
             "chunk_size": self.chunk_size,
         }
 
-        # Add optional basic fields
         if self.predefined_voice_id is not None:
             result["predefined_voice_id"] = self.predefined_voice_id
         if self.reference_audio_filename is not None:
             result["reference_audio_filename"] = self.reference_audio_filename
 
-        # Flatten voice_profile fields if present
         if self.voice_profile is not None:
             profile_dict = asdict(self.voice_profile)
-            # Add non-None voice profile fields directly to result
             for key, value in profile_dict.items():
                 if value is not None:
                     result[key] = value
@@ -132,25 +131,83 @@ class ChatterboxTTSRequest:
         return result
 
 
-class ChatterboxTTSClient:
+class ChatterboxTTSClient(TTSService):
     """
-    Client for Chatterbox TTS API with streaming support.
+    Chatterbox implementation of TTSService.
     """
 
-    def __init__(self, base_url: str, timeout: int = 30):
+    def __init__(self, config: ChatterboxTTSConfig):
         """
         Initialize Chatterbox TTS Client.
 
         Args:
-            base_url: Base URL of the Chatterbox TTS API (e.g., "http://localhost:8000")
-            timeout: Request timeout in seconds
+            config: Chatterbox TTS configuration
         """
-        self.base_url = base_url.rstrip("/")
-        self.tts_endpoint = f"{self.base_url}/tts"
-        self.timeout = timeout
+        self.config = config
+        self.base_url = config.base_url.rstrip("/")
+        self.tts_endpoint = f"{self.base_url}{config.endpoint}"
+        self.timeout = config.timeout
         self.session = requests.Session()
 
-    def synthesize_to_stream(self, request: ChatterboxTTSRequest) -> requests.Response:
+    def synthesize(self, request: TTSRequest, output_dir: Path) -> AudioFile:
+        """Synthesize speech for a single request."""
+        chatterbox_request = ChatterboxTTSRequest.from_domain_request(request)
+        response = self._synthesize_to_stream(chatterbox_request)
+
+        # Create filename for this request
+        filename = f"{request.character.name.lower().replace(' ', '_')}.{request.output_format.value}"
+        output_path = output_dir / filename
+
+        save_result = self._save_stream_to_file(response, output_path)
+
+        if not save_result["success"]:
+            raise Exception(f"Failed to save audio file: {save_result['error']}")
+
+        # Estimate duration (rough calculation)
+        words = len(request.text.split())
+        estimated_duration = (words / 150) * 60  # 150 words per minute
+
+        return AudioFile(
+            path=output_path,
+            character=request.character,
+            dialogue=request.text,
+            duration_seconds=estimated_duration,
+            file_size_bytes=save_result["file_size_bytes"],
+        )
+
+    def synthesize_script(
+        self, requests: List[TTSRequest], output_dir: Path
+    ) -> AudioScript:
+        """Synthesize speech for multiple requests."""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        speech_script = AudioScript()
+
+        for i, request in enumerate(requests):
+            # Create unique filename with index prefix
+            filename = f"{i:03d}_{request.character.name.lower().replace(' ', '_')}.{request.output_format.value}"
+            output_dir = output_dir  # Use the base directory directly
+
+            # Update the request to synthesize to the correct path
+            audio_file = self.synthesize(request, output_dir)
+
+            # Rename the file to include the index prefix
+            indexed_path = output_dir / filename
+            audio_file.path.rename(indexed_path)
+
+            # Update the audio file path
+            audio_file = AudioFile(
+                path=indexed_path,
+                character=audio_file.character,
+                dialogue=audio_file.dialogue,
+                duration_seconds=audio_file.duration_seconds,
+                file_size_bytes=audio_file.file_size_bytes,
+            )
+
+            speech_script.add_audio_file(audio_file)
+
+        return speech_script
+
+    def _synthesize_to_stream(self, request: ChatterboxTTSRequest) -> requests.Response:
         """
         Synthesize text to speech and return streaming response.
 
@@ -160,20 +217,61 @@ class ChatterboxTTSClient:
         Returns:
             Streaming response object
         """
-        response = self.session.post(
-            self.tts_endpoint,
-            json=request.to_dict(),
-            headers={
-                "Content-Type": "application/json",
-                "Accept": f"audio/{request.output_format}",
-            },
-            stream=True,
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        return response
+        response = None
+        try:
+            response = self.session.post(
+                self.tts_endpoint,
+                json=request.to_dict(),
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": f"audio/{request.output_format}",
+                },
+                stream=True,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response
+        except requests.exceptions.HTTPError as e:
+            if response is None:
+                raise Exception(
+                    f"Failed to receive response from TTS server at {self.tts_endpoint}: {str(e)}"
+                )
+            if response.status_code == 404:
+                try:
+                    error_detail = response.json().get("detail", "Resource not found")
+                    if "not found" in error_detail.lower():
+                        if (
+                            request.voice_mode == "clone"
+                            and request.reference_audio_filename
+                        ):
+                            raise Exception(
+                                f"Voice clone file '{request.reference_audio_filename}' not found on TTS server. "
+                                f"Please upload the file or use a predefined voice instead."
+                            )
+                        elif (
+                            request.voice_mode == "predefined"
+                            and request.predefined_voice_id
+                        ):
+                            raise Exception(
+                                f"Predefined voice '{request.predefined_voice_id}' not found on TTS server. "
+                                f"Check available voices with get_predefined_voices()."
+                            )
+                        else:
+                            raise Exception(f"TTS resource not found: {error_detail}")
+                    else:
+                        raise Exception(f"TTS server error (404): {error_detail}")
+                except (ValueError, KeyError):
+                    raise Exception(f"TTS server returned 404: {response.text}")
+            else:
+                raise Exception(
+                    f"TTS server error ({response.status_code}): {response.text}"
+                )
+        except requests.exceptions.RequestException as e:
+            raise Exception(
+                f"Failed to connect to TTS server at {self.tts_endpoint}: {str(e)}"
+            )
 
-    def save_stream_to_file(
+    def _save_stream_to_file(
         self, response: requests.Response, output_path: Union[str, Path]
     ) -> dict:
         """
@@ -213,7 +311,7 @@ class ChatterboxTTSClient:
                 "save_time_seconds": time.time() - start_time,
             }
 
-    def synthesize_to_file(
+    def _synthesize_to_file(
         self, request: ChatterboxTTSRequest, output_path: Union[str, Path]
     ) -> dict:
         """
@@ -230,10 +328,10 @@ class ChatterboxTTSClient:
 
         try:
             # Get streaming response
-            response = self.synthesize_to_stream(request)
+            response = self._synthesize_to_stream(request)
 
             # Save stream to file
-            save_result = self.save_stream_to_file(response, output_path)
+            save_result = self._save_stream_to_file(response, output_path)
 
             synthesis_time = time.time() - start_time
 
@@ -305,7 +403,7 @@ class ChatterboxTTSClient:
             output_path = output_dir / filename
 
             # Synthesize using stream-based method
-            result = self.synthesize_to_file(request, output_path)
+            result = self._synthesize_to_file(request, output_path)
             result["index"] = i
             result["text"] = text
             results.append(result)
@@ -529,160 +627,3 @@ class ChatterboxTTSClient:
                 "reference": None if reference["success"] else reference["error"],
             },
         }
-
-
-# Utility functions for TikTok workflow integration
-class TikTokTTSManager:
-    """
-    Manager class specifically for TikTok video workflow.
-    """
-
-    def __init__(self, tts_client: ChatterboxTTSClient):
-        self.tts_client = tts_client
-
-    def parse_script_lines(self, script: str) -> list[tuple[str, str]]:
-        """
-        Parse script into (character, dialogue) pairs.
-
-        Args:
-            script: Script text with format "CHARACTER: dialogue"
-
-        Returns:
-            List of (character, dialogue) tuples
-        """
-        lines = []
-        for line in script.strip().split("\n"):
-            line = line.strip()
-            if ":" in line and line:
-                character, dialogue = line.split(":", 1)
-                lines.append((character.strip(), dialogue.strip()))
-        return lines
-
-    def generate_speech_files(
-        self,
-        script: str,
-        output_dir: Union[str, Path],
-        voice_mapping: dict[str, str],
-        base_config: ChatterboxTTSRequest,
-    ) -> tuple[list[dict], list[dict]]:
-        """
-        Generate speech files for entire script with character voice mapping.
-
-        Args:
-            script: Script text
-            output_dir: Directory to save audio files
-            voice_mapping: Dict mapping character names to voice IDs
-            base_config: Base TTS configuration
-
-        Returns:
-            Tuple of (synthesis_results, timing_data)
-        """
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Parse script
-        script_lines = self.parse_script_lines(script)
-
-        synthesis_results = []
-        timing_data = []
-        current_time = 0
-
-        for i, (character, dialogue) in enumerate(script_lines):
-            # Get voice for character (fallback to first voice if not mapped)
-            voice_id = voice_mapping.get(character, list(voice_mapping.values())[0])
-
-            # Create request for this line
-            request = ChatterboxTTSRequest(
-                text=dialogue,
-                voice_mode=base_config.voice_mode,
-                predefined_voice_id=voice_id
-                if base_config.voice_mode == "predefined"
-                else None,
-                reference_audio_filename=voice_id
-                if base_config.voice_mode == "clone"
-                else None,
-                output_format=base_config.output_format,
-                split_text=base_config.split_text,
-                chunk_size=base_config.chunk_size,
-                voice_profile=base_config.voice_profile,
-            )
-
-            # Generate filename
-            filename = (
-                f"{i:03d}_{character.lower().replace(' ', '_')}.{request.output_format}"
-            )
-            output_path = output_dir / filename
-
-            # Synthesize using stream-based method
-            result = self.tts_client.synthesize_to_file(request, output_path)
-            result.update(
-                {
-                    "index": i,
-                    "character": character,
-                    "dialogue": dialogue,
-                    "filename": filename,
-                }
-            )
-            synthesis_results.append(result)
-
-            # Estimate duration (rough estimate: 150 words per minute)
-            words = len(dialogue.split())
-            estimated_duration = (words / 150) * 60  # seconds
-
-            timing_data.append(
-                {
-                    "character": character,
-                    "dialogue": dialogue,
-                    "filename": filename,
-                    "start_time": current_time,
-                    "duration": estimated_duration,
-                    "index": i,
-                }
-            )
-
-            current_time += estimated_duration
-
-            print(f"Generated {i + 1}/{len(script_lines)}: {character} - {filename}")
-
-        # Save timing data
-        timing_file = output_dir / "timing_data.json"
-        with open(timing_file, "w") as f:
-            json.dump(timing_data, f, indent=2)
-
-        # Save master order file
-        master_file = output_dir / "master.txt"
-        with open(master_file, "w") as f:
-            for item in timing_data:
-                f.write(f"{item['filename']}\n")
-
-        return synthesis_results, timing_data
-
-
-if __name__ == "__main__":
-    # Example usage
-    client = ChatterboxTTSClient(base_url="http://localhost:8004")
-
-    # Define a base TTS request configuration
-    base_config = ChatterboxTTSRequest(
-        text="My name is peter and I like fags, also known as cigarettes",
-        voice_mode="clone",
-        reference_audio_filename="Petersmall.mp3",
-        output_format="wav",
-        split_text=True,
-        chunk_size=120,
-        voice_profile=CHATTERBOX_VOICE_PROFILES.EXPRESSIVE_MONOLOGUE.value,
-    )
-
-    output_dir = Path("")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        response = client.synthesize_to_file(
-            request=base_config, output_path="output.wav"
-        )
-        print("Synthesis completed successfully.")
-        print(f"response: {response}")
-        print(f"Output saved to: {response['output_path']}")
-    except Exception as e:
-        print(f"Error during synthesis: {e}")
-

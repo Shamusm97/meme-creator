@@ -1,46 +1,20 @@
 from google import genai
 from google.genai import types
 from typing import List, Optional
-from dataclasses import dataclass
 
-from config.domain.models import ScriptConfig, Character
+from config.domain.models import ScriptConfig, Character, GeminiLLMConfig
 from script.domain.models import LLMClient, ScriptEntry
 
 
-@dataclass
-class GeminiConfig:
-    """Configuration for the Gemini LLM client"""
-
-    temperature: float
-    max_output_tokens: int
-    model: str
-    direct_output: bool
-    thinking_config: types.ThinkingConfig
-
-    def __post_init__(self):
-        if not (0 <= self.temperature <= 2):
-            raise ValueError("Temperature must be between 0 and 2")
-        if self.max_output_tokens <= 0:
-            raise ValueError("max_output_tokens must be a positive integer")
-
-
 class GeminiLLMClient(LLMClient):
-    def __init__(self, gemini_config: GeminiConfig, api_key: Optional[str] = None):
-        """
-        Initialize the Google LLM client with validated configuration.
-
-        Args:
-            gemini_config: Pre-validated Gemini configuration
-            api_key: Google API key. If None, will try to get from environment variable.
-        """
+    def __init__(self, config: GeminiLLMConfig, api_key: Optional[str] = None):
         if api_key:
             self.client = genai.Client(api_key=api_key)
         else:
             # Will automatically pick up GEMINI_API_KEY or GOOGLE_API_KEY from environment
             self.client = genai.Client()
 
-        # Store validated config
-        self.config = gemini_config
+        self.config = config
 
     def generate_script(
         self,
@@ -66,7 +40,9 @@ class GeminiLLMClient(LLMClient):
             print("=== SCRIPT GENERATED ===")
 
             raw_script_content = response.text.strip()
-            parsed_script = self.parse_script_with_characters(characters=script_config.characters, script=raw_script_content)
+            parsed_script = self.parse_script_with_characters(
+                characters=script_config.characters, script=raw_script_content
+            )
             print(f"Parsed {len(parsed_script)} entries from generated script.")
 
             return parsed_script
@@ -76,11 +52,16 @@ class GeminiLLMClient(LLMClient):
 
     def _create_genai_config(self, system_prompt: str) -> types.GenerateContentConfig:
         """Convert stored config to Google GenAI config format."""
+        thinking_config = types.ThinkingConfig(
+            include_thoughts=self.config.thinking_config.include_thoughts,
+            thinking_budget=self.config.thinking_config.thinking_budget,
+        )
+        
         return types.GenerateContentConfig(
             system_instruction=system_prompt,
             temperature=self.config.temperature,
             max_output_tokens=self.config.max_output_tokens,
-            thinking_config=self.config.thinking_config,
+            thinking_config=thinking_config,
         )
 
     def validate_script(self, script: str) -> List[str]:
@@ -91,7 +72,9 @@ class GeminiLLMClient(LLMClient):
                 errors.append(f"Line {i}: Missing colon - '{line.strip()}'")
         return errors
 
-    def parse_script_with_characters(self, characters: List[Character], script: str) -> List[ScriptEntry]:
+    def parse_script_with_characters(
+        self, characters: List[Character], script: str
+    ) -> List[ScriptEntry]:
         """Parse script into structured data"""
         # Validate first
         errors = self.validate_script(script)
@@ -103,7 +86,9 @@ class GeminiLLMClient(LLMClient):
         for line in script.split("\n"):
             if ":" in line:
                 character_name, content = line.split(":", 1)
-                print(f"Processing character: {character_name.strip()} with content: {content.strip()}")
+                print(
+                    f"Processing character: {character_name.strip()} with content: {content.strip()}"
+                )
                 for character in characters:
                     if character.name.lower() == character_name.strip().lower():
                         # Match found, create ScriptEntry
@@ -114,7 +99,10 @@ class GeminiLLMClient(LLMClient):
                 else:
                     # No match found, create a generic ScriptEntry
                     script_entries.append(
-                        ScriptEntry(character=Character(name=character_name.strip()), content=content.strip())
+                        ScriptEntry(
+                            character=Character(name=character_name.strip()),
+                            content=content.strip(),
+                        )
                     )
 
         if not script_entries:
