@@ -5,7 +5,9 @@ from typing import Optional
 
 from config.domain.models import VideoConfig
 from config.infrastructure.json import ConfigurationLoader
-from tts.application.load_audio_script_use_case import LoadAudioScriptUseCase
+from tts.application.load_audio_script_from_dir_use_case import (
+    LoadAudioScriptFromDirUseCase,
+)
 from tts.application.merge_audio_script_use_case import MergeAudioScriptUseCase
 from video.application.create_video_use_case import CreateVideoUseCase
 from tts.domain.models import AudioScript, AudioFile
@@ -16,7 +18,7 @@ class MemeFromAudioUseCase:
     """Creates memes from existing audio files, skipping script generation and TTS."""
 
     def __init__(self):
-        self.load_audio_use_case = LoadAudioScriptUseCase()
+        self.load_audio_use_case = LoadAudioScriptFromDirUseCase()
         self.merge_use_case = MergeAudioScriptUseCase()
         self.video_use_case = CreateVideoUseCase()
 
@@ -54,6 +56,7 @@ class MemeFromAudioUseCase:
                 audio_script=audio_script,
                 output_path=merged_output_path,
                 delay_between_files=delay_between_files,
+                show_progress=True,
             )
 
         # Step 3: Create video
@@ -61,6 +64,7 @@ class MemeFromAudioUseCase:
             audio_script=audio_script,
             video_config=video_config,
             output_path=output_video_path,
+            show_progress=True,
         )
 
         return audio_script, merged_audio_file, video_file
@@ -180,4 +184,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

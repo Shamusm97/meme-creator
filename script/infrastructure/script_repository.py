@@ -3,15 +3,15 @@ from typing import List
 import json
 
 from config.domain.models import Character
-from script.domain.models import ScriptEntry
+from script.domain.models import Script, ScriptEntry
 
 
-class ScriptEntriesRepository:
-    """Repository for loading and saving script entries from/to files."""
+class ScriptRepository:
+    """Repository for loading and saving scripts from/to files."""
 
-    def execute_from_dialogue_file(
+    def load_from_formatted_txt_file(
         self, file_path: Path, characters: List[Character]
-    ) -> List[ScriptEntry]:
+    ) -> Script:
         """
         Load script entries from a dialogue text file.
 
@@ -24,7 +24,7 @@ class ScriptEntriesRepository:
             characters: List of available characters for matching
 
         Returns:
-            List of script entries
+            List of script entries, wrapped in a Script object
         """
         if not file_path.exists():
             raise FileNotFoundError(f"Dialogue file not found: {file_path}")
@@ -63,9 +63,54 @@ class ScriptEntriesRepository:
                     ScriptEntry(character=character, content=dialogue)
                 )
 
-        return script_entries
+            script = Script(entries=script_entries)
 
-    def execute_from_json_file(self, file_path: Path) -> List[ScriptEntry]:
+        return script
+
+    def validate_script_format(self, script_str: str) -> List[str]:
+        """Validate script format and return list of error messages"""
+        errors = []
+        for i, line in enumerate(script_str.split("\n"), 1):
+            if line.strip() and ":" not in line:
+                errors.append(f"Line {i}: Missing colon - '{line.strip()}'")
+        return errors
+
+    def parse_script_from_string(
+        self, script_str: str, characters: List[Character]
+    ) -> Script:
+        """Parse script string into structured data"""
+        # Validate first
+        errors = self.validate_script_format(script_str)
+        if errors:
+            raise ValueError(f"Invalid script format: {', '.join(errors)}")
+
+        # Parse valid entries
+        script_entries = []
+        for line in script_str.split("\n"):
+            if ":" in line:
+                character_name, content = line.split(":", 1)
+                for character in characters:
+                    if character.name.lower() == character_name.strip().lower():
+                        # Match found, create ScriptEntry
+                        script_entries.append(
+                            ScriptEntry(character=character, content=content.strip())
+                        )
+                        break
+                else:
+                    # No match found, create a generic ScriptEntry
+                    script_entries.append(
+                        ScriptEntry(
+                            character=Character(name=character_name.strip()),
+                            content=content.strip(),
+                        )
+                    )
+
+        if not script_entries:
+            raise ValueError("No valid script entries found after parsing.")
+
+        return Script(entries=script_entries)
+
+    def load_from_json_file(self, file_path: Path) -> Script:
         """
         Load script entries from a JSON file.
 
@@ -82,7 +127,7 @@ class ScriptEntriesRepository:
             file_path: Path to JSON file
 
         Returns:
-            List of script entries
+            List of script entries, wrapped in a Script object
         """
         if not file_path.exists():
             raise FileNotFoundError(f"JSON file not found: {file_path}")
@@ -114,71 +159,13 @@ class ScriptEntriesRepository:
                 ScriptEntry(character=character, content=entry_data["content"])
             )
 
-        return script_entries
+        script = Script(entries=script_entries)
 
-    def execute_from_script_file(
-        self, file_path: Path, characters: List[Character]
-    ) -> List[ScriptEntry]:
-        """
-        Load script entries from a formatted script file.
+        return script
 
-        Format expected:
-        # Comments and metadata (ignored)
-        1. CHARACTER_NAME: dialogue
-        2. ANOTHER_CHARACTER: more dialogue
-
-        Args:
-            file_path: Path to script file
-            characters: List of available characters for matching
-
-        Returns:
-            List of script entries
-        """
-        if not file_path.exists():
-            raise FileNotFoundError(f"Script file not found: {file_path}")
-
-        script_entries = []
-        character_map = {char.name.lower(): char for char in characters}
-
-        with open(file_path, "r", encoding="utf-8") as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-
-                # Skip empty lines and comments
-                if not line or line.startswith("#"):
-                    continue
-
-                # Parse numbered format "1. CHARACTER: dialogue"
-                if ":" not in line:
-                    continue
-
-                # Remove numbering if present
-                if line[0].isdigit() and "." in line:
-                    line = line.split(".", 1)[1].strip()
-
-                character_name, dialogue = line.split(":", 1)
-                character_name = character_name.strip()
-                dialogue = dialogue.strip()
-
-                # Find matching character
-                character = character_map.get(character_name.lower())
-                if not character:
-                    # Create a basic character if not found
-                    character = Character(name=character_name)
-                    character_map[character_name.lower()] = character
-                    print(
-                        f"Warning: Character '{character_name}' not in config, created basic character"
-                    )
-
-                script_entries.append(
-                    ScriptEntry(character=character, content=dialogue)
-                )
-
-        return script_entries
-
-    def execute_auto_detect(
+    def load_auto_detect(
         self, file_path: Path, characters: List[Character] | None = None
-    ) -> List[ScriptEntry]:
+    ) -> Script:
         """
         Auto-detect file format and load script entries.
 
@@ -195,24 +182,13 @@ class ScriptEntriesRepository:
         suffix = file_path.suffix.lower()
 
         if suffix == ".json":
-            return self.execute_from_json_file(file_path)
+            return self.load_from_json_file(file_path)
         elif suffix in [".txt", ".script"]:
-            # Try to detect if it's a formatted script or dialogue
-            with open(file_path, "r", encoding="utf-8") as f:
-                first_lines = [f.readline().strip() for _ in range(5)]
-
-            # Check if any line starts with a number (formatted script)
-            if any(line and line[0].isdigit() and "." in line for line in first_lines):
-                return self.execute_from_script_file(file_path, characters)
-            else:
-                return self.execute_from_dialogue_file(file_path, characters)
+            return self.load_from_formatted_txt_file(file_path, characters)
         else:
-            # Default to dialogue format
-            return self.execute_from_dialogue_file(file_path, characters)
+            return self.load_from_formatted_txt_file(file_path, characters)
 
-    def save_to_json_file(
-        self, script_entries: List[ScriptEntry], file_path: Path
-    ) -> None:
+    def save_to_json_file(self, script: Script, file_path: Path) -> None:
         """
         Save script entries to a JSON file.
 
@@ -223,7 +199,7 @@ class ScriptEntriesRepository:
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
         data = []
-        for entry in script_entries:
+        for entry in script.entries:
             entry_data = {
                 "character": {
                     "name": entry.character.name,
@@ -263,24 +239,24 @@ def main():
         sys.exit(1)
 
     try:
-        repository = ScriptEntriesRepository()
-        script_entries = repository.execute_auto_detect(script_file)
+        repository = ScriptRepository()
+        script = repository.load_auto_detect(script_file)
 
         print(f"Loaded Script from: {script_file}")
         print("=" * 50)
-        print(f"✓ Loaded {len(script_entries)} script entries")
+        print(f"✓ Loaded {len(script.entries)} script entries")
 
-        characters = list(set(entry.character.name for entry in script_entries))
+        characters = list(set(entry.character.name for entry in script.entries))
         print(f"✓ Characters: {', '.join(characters)}")
 
-        print(f"\nScript Preview:")
+        print("\nScript Preview:")
         print("-" * 30)
 
-        for i, entry in enumerate(script_entries[:5], 1):  # Show first 5
+        for i, entry in enumerate(script.entries[:5], 1):  # Show first 5
             print(f"{i}. {entry.character.name}: {entry.content}")
 
-        if len(script_entries) > 5:
-            print(f"... and {len(script_entries) - 5} more entries")
+        if len(script.entries) > 5:
+            print(f"... and {len(script.entries) - 5} more entries")
 
     except Exception as e:
         print(f"Error loading script: {e}")
@@ -292,4 +268,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

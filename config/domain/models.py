@@ -16,8 +16,6 @@ class ProjectConfig:
     video_config: Optional[VideoConfig]
 
     def __post_init__(self):
-        # Validate project name by checking if it is a non-empty string and
-        # replacing spaces with underscores
         if not isinstance(self.project_name, str) or not self.project_name.strip():
             raise ValueError("Project name must be a non-empty string")
         self.project_name = self.project_name.strip().replace(" ", "_")
@@ -42,66 +40,17 @@ class Character:
 
 
 @dataclass
-class ChatterboxTTSConfig:
-    """Configuration specific to Chatterbox TTS provider"""
-
-    base_url: str
-    endpoint: str = field(default="/tts")
-    timeout: int = field(default=120)
-
-    def __post_init__(self):
-        if not self.base_url.strip():
-            raise ValueError("Base URL cannot be empty")
-        if self.timeout <= 0:
-            raise ValueError("Timeout must be positive")
-
-
-@dataclass
 class TTSConfig:
     """Configuration for text-to-speech settings"""
 
     provider: str
-    chatterbox: Optional[ChatterboxTTSConfig] = field(default=None)
+    config: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if not isinstance(self.provider, str) or not self.provider.strip():
             raise ValueError("Provider must be a non-empty string")
-
-        provider_lower = self.provider.lower()
-        if provider_lower == "chatterbox":
-            if self.chatterbox is None:
-                raise ValueError(
-                    "Chatterbox configuration is required when provider is 'chatterbox'"
-                )
-        else:
-            raise ValueError(f"Unsupported TTS provider: {self.provider}")
-
-    def get_provider_config(self) -> ChatterboxTTSConfig:
-        """Get the provider-specific configuration"""
-        if self.provider.lower() == "chatterbox":
-            assert self.chatterbox is not None, (
-                "Chatterbox config should not be None here"
-            )
-            return self.chatterbox
-        raise ValueError(f"No configuration available for provider: {self.provider}")
-
-
-@dataclass
-class MoviePyVideoConfig:
-    """Configuration specific to MoviePy video provider"""
-
-    quality: str = field(default="medium")
-    fps: int = field(default=30)
-    codec: str = field(default="libx264")
-
-    def __post_init__(self):
-        valid_qualities = ["low", "medium", "high", "ultra"]
-        if self.quality not in valid_qualities:
-            raise ValueError(f"Quality must be one of: {valid_qualities}")
-        if self.fps <= 0:
-            raise ValueError("FPS must be positive")
-        if not self.codec.strip():
-            raise ValueError("Codec cannot be empty")
+        if not isinstance(self.config, dict):
+            raise ValueError("Config must be a dictionary")
 
 
 @dataclass
@@ -110,7 +59,7 @@ class VideoConfig:
 
     provider: str
     background_video: Path
-    moviepy: Optional[MoviePyVideoConfig] = field(default=None)
+    config: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if not isinstance(self.provider, str) or not self.provider.strip():
@@ -119,64 +68,8 @@ class VideoConfig:
             raise ValueError(
                 f"Background video file does not exist: {self.background_video}"
             )
-
-        provider_lower = self.provider.lower()
-        if provider_lower == "moviepy":
-            if self.moviepy is None:
-                self.moviepy = MoviePyVideoConfig()
-        else:
-            raise ValueError(f"Unsupported video provider: {self.provider}")
-
-    def get_provider_config(self) -> MoviePyVideoConfig:
-        """Get the provider-specific configuration"""
-        if self.provider.lower() == "moviepy":
-            assert self.moviepy is not None, "MoviePy config should not be None here"
-            return self.moviepy
-        raise ValueError(f"No configuration available for provider: {self.provider}")
-
-
-@dataclass
-class ThinkingConfig:
-    """Configuration for LLM thinking mode"""
-
-    include_thoughts: bool = field(default=False)
-    thinking_budget: int = field(default=0)
-
-    def __post_init__(self):
-        if not isinstance(self.include_thoughts, bool):
-            raise ValueError("include_thoughts must be a boolean")
-        if (
-            not isinstance(self.thinking_budget, (int, float))
-            or self.thinking_budget < 0
-        ):
-            raise ValueError("thinking_budget must be a non-negative number")
-        self.thinking_budget = int(self.thinking_budget)
-
-
-@dataclass
-class GeminiLLMConfig:
-    """Configuration specific to Gemini LLM provider"""
-
-    temperature: float = field(default=0.7)
-    max_output_tokens: int = field(default=1024)
-    model: str = field(default="gemini-2.5-flash")
-    direct_output: bool = field(default=False)
-    thinking_config: ThinkingConfig = field(default_factory=ThinkingConfig)
-
-    def __post_init__(self):
-        if (
-            not isinstance(self.temperature, (int, float))
-            or not 0 <= self.temperature <= 2
-        ):
-            raise ValueError("Temperature must be a number between 0 and 2")
-        if not isinstance(self.max_output_tokens, int) or self.max_output_tokens <= 0:
-            raise ValueError("max_output_tokens must be a positive integer")
-        if not isinstance(self.model, str) or not self.model.strip():
-            raise ValueError("Model must be a non-empty string")
-        if not isinstance(self.direct_output, bool):
-            raise ValueError("direct_output must be a boolean")
-        if not isinstance(self.thinking_config, ThinkingConfig):
-            raise ValueError("thinking_config must be a ThinkingConfig instance")
+        if not isinstance(self.config, dict):
+            raise ValueError("Config must be a dictionary")
 
 
 @dataclass
@@ -184,26 +77,14 @@ class LLMConfig:
     """Configuration for the LLM client"""
 
     provider: str
-    gemini: Optional[GeminiLLMConfig] = field(default=None)
+    config: dict = field(default_factory=dict)
     api_key: str = field(default="")
 
     def __post_init__(self):
         if not isinstance(self.provider, str) or not self.provider.strip():
             raise ValueError("Provider must be a non-empty string")
-
-        provider_lower = self.provider.lower()
-        if provider_lower == "gemini":
-            if self.gemini is None:
-                self.gemini = GeminiLLMConfig()
-        else:
-            raise ValueError(f"Unsupported LLM provider: {self.provider}")
-
-    def get_provider_config(self) -> GeminiLLMConfig:
-        """Get the provider-specific configuration"""
-        if self.provider.lower() == "gemini":
-            assert self.gemini is not None, "Gemini config should not be None here"
-            return self.gemini
-        raise ValueError(f"No configuration available for provider: {self.provider}")
+        if not isinstance(self.config, dict):
+            raise ValueError("Config must be a dictionary")
 
 
 @dataclass

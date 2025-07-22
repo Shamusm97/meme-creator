@@ -21,6 +21,7 @@
                     moviepy
                     google-genai
                     python-dotenv
+                    tqdm
                 ];
 
                 python = pkgs.python3.withPackages pythonPackages;

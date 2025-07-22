@@ -72,6 +72,7 @@ class GenerateScriptAndTTSUseCase:
                 audio_script=speech_script,
                 output_path=merged_output_path,
                 delay_between_files=delay_between_files,
+                show_progress=True,
             )
 
         # Create summary file

@@ -2,7 +2,11 @@ import os
 
 from script.domain.models import LLMClient
 from config.domain.models import LLMConfig
-from script.infrastructure.gemini_client import GeminiLLMClient
+from script.infrastructure.gemini_client import (
+    GeminiLLMClient,
+    GeminiLLMConfig,
+    ThinkingConfig,
+)
 
 
 class LLMClientFactory:
@@ -25,5 +29,13 @@ class LLMClientFactory:
             or os.getenv("GOOGLE_API_KEY")
         )
 
-        gemini_config = llm_config.get_provider_config()
+        # Create provider-specific config from generic config dict
+        config_dict = llm_config.config.copy()
+
+        # Handle nested ThinkingConfig
+        if "thinking_config" in config_dict:
+            thinking_data = config_dict["thinking_config"]
+            config_dict["thinking_config"] = ThinkingConfig(**thinking_data)
+
+        gemini_config = GeminiLLMConfig(**config_dict)
         return GeminiLLMClient(config=gemini_config, api_key=api_key)

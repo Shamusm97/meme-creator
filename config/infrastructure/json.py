@@ -7,12 +7,8 @@ from config.domain.models import (
     Character,
     ScriptConfig,
     LLMConfig,
-    GeminiLLMConfig,
-    ThinkingConfig,
     TTSConfig,
-    ChatterboxTTSConfig,
     VideoConfig,
-    MoviePyVideoConfig,
 )
 
 
@@ -107,29 +103,17 @@ class ConfigurationLoader:
     def _load_llm_config(llm_data: Dict[str, Any]) -> LLMConfig:
         """Load LLM configuration from data."""
         provider = llm_data["provider"]
+        config = {}
 
-        gemini_config = None
-        if provider.lower() == "gemini" and "gemini" in llm_data:
-            gemini_data = llm_data["gemini"]
-            thinking_config = ThinkingConfig(
-                include_thoughts=gemini_data.get("thinking_config", {}).get(
-                    "include_thoughts", False
-                ),
-                thinking_budget=gemini_data.get("thinking_config", {}).get(
-                    "thinking_budget", 0
-                ),
-            )
+        # Extract provider-specific config
+        config = llm_data[provider.lower()]
 
-            gemini_config = GeminiLLMConfig(
-                temperature=gemini_data.get("temperature", 0.7),
-                max_output_tokens=gemini_data.get("max_output_tokens", 1024),
-                model=gemini_data.get("model", "gemini-2.5-flash"),
-                direct_output=gemini_data.get("direct_output", False),
-                thinking_config=thinking_config,
-            )
+        # Check that the config is not empty
+        if not config:
+            raise ValueError(f"Configuration for provider '{provider}' is empty.")
 
         return LLMConfig(
-            provider=provider, gemini=gemini_config, api_key=llm_data.get("api_key", "")
+            provider=provider, config=config, api_key=llm_data.get("api_key", "")
         )
 
     @staticmethod
@@ -137,35 +121,29 @@ class ConfigurationLoader:
         """Load TTS configuration from data."""
         provider = tts_data["provider"]
 
-        chatterbox_config = None
-        if provider.lower() == "chatterbox" and "chatterbox" in tts_data:
-            chatterbox_data = tts_data["chatterbox"]
-            chatterbox_config = ChatterboxTTSConfig(
-                base_url=chatterbox_data["base_url"],
-                endpoint=chatterbox_data.get("endpoint", "/tts"),
-                timeout=chatterbox_data.get("timeout", 120),
-            )
+        # Extract provider-specific config
+        config = tts_data[provider.lower()]
 
-        return TTSConfig(provider=provider, chatterbox=chatterbox_config)
+        if not config:
+            raise ValueError(f"Configuration for provider '{provider}' is empty.")
+
+        return TTSConfig(provider=provider, config=config)
 
     @staticmethod
     def _load_video_config(video_data: Dict[str, Any]) -> VideoConfig:
         """Load video configuration from data."""
         provider = video_data.get("provider", "moviepy")
 
-        moviepy_config = None
-        if provider.lower() == "moviepy":
-            moviepy_data = video_data.get("moviepy", {})
-            moviepy_config = MoviePyVideoConfig(
-                quality=moviepy_data.get("quality", "medium"),
-                fps=moviepy_data.get("fps", 30),
-                codec=moviepy_data.get("codec", "libx264"),
-            )
+        # Extract provider-specific config
+        config = video_data[provider.lower()]
+
+        if not config:
+            raise ValueError(f"Configuration for provider '{provider}' is empty.")
 
         return VideoConfig(
             provider=provider,
             background_video=Path(video_data["background_video"]),
-            moviepy=moviepy_config,
+            config=config,
         )
 
 
@@ -175,18 +153,34 @@ class ConfigurationSerializer:
     @staticmethod
     def to_dict(config: ProjectConfig) -> Dict[str, Any]:
         """Convert ProjectConfig to dictionary for JSON serialization."""
-        return {
+        result: Dict[str, Any] = {
             "project_name": config.project_name,
-            "characters": [
+            "base_output_dir": str(config.base_output_dir),
+        }
+
+        # Add optional sections only if they exist
+        if config.character_config:
+            result["characters"] = [
                 ConfigurationSerializer._character_to_dict(char)
                 for char in config.character_config
-            ],
-            "script": ConfigurationSerializer._script_config_to_dict(
+            ]
+
+        if config.script_config:
+            result["script"] = ConfigurationSerializer._script_config_to_dict(
                 config.script_config
-            ),
-            "tts": ConfigurationSerializer._tts_config_to_dict(config.tts_config),
-            "video": ConfigurationSerializer._video_config_to_dict(config.video_config),
-        }
+            )
+
+        if config.tts_config:
+            result["tts"] = ConfigurationSerializer._tts_config_to_dict(
+                config.tts_config
+            )
+
+        if config.video_config:
+            result["video"] = ConfigurationSerializer._video_config_to_dict(
+                config.video_config
+            )
+
+        return result
 
     @staticmethod
     def _character_to_dict(character: Character) -> Dict[str, Any]:
@@ -214,10 +208,9 @@ class ConfigurationSerializer:
             "user_prompt_extra": script_config.user_prompt_extra,
         }
 
-        if hasattr(script_config, "llm_config"):
-            result["llm"] = ConfigurationSerializer._llm_config_to_dict(
-                script_config.llm_config
-            )
+        result["llm"] = ConfigurationSerializer._llm_config_to_dict(
+            script_config.llm_config
+        )
 
         return result
 
@@ -229,17 +222,9 @@ class ConfigurationSerializer:
             "api_key": llm_config.api_key,
         }
 
-        if llm_config.gemini:
-            result["gemini"] = {
-                "temperature": llm_config.gemini.temperature,
-                "max_output_tokens": llm_config.gemini.max_output_tokens,
-                "model": llm_config.gemini.model,
-                "direct_output": llm_config.gemini.direct_output,
-                "thinking_config": {
-                    "include_thoughts": llm_config.gemini.thinking_config.include_thoughts,
-                    "thinking_budget": llm_config.gemini.thinking_config.thinking_budget,
-                },
-            }
+        # Add provider-specific config if present
+        if llm_config.config and llm_config.provider.lower() == "gemini":
+            result["gemini"] = llm_config.config
 
         return result
 
@@ -248,12 +233,9 @@ class ConfigurationSerializer:
         """Convert TTSConfig to dictionary."""
         result: Dict[str, Any] = {"provider": tts_config.provider}
 
-        if tts_config.chatterbox:
-            result["chatterbox"] = {
-                "base_url": tts_config.chatterbox.base_url,
-                "endpoint": tts_config.chatterbox.endpoint,
-                "timeout": tts_config.chatterbox.timeout,
-            }
+        # Add provider-specific config if present
+        if tts_config.config and tts_config.provider.lower() == "chatterbox":
+            result["chatterbox"] = tts_config.config
 
         return result
 
@@ -265,12 +247,9 @@ class ConfigurationSerializer:
             "background_video": str(video_config.background_video),
         }
 
-        if video_config.moviepy:
-            result["moviepy"] = {
-                "quality": video_config.moviepy.quality,
-                "fps": video_config.moviepy.fps,
-                "codec": video_config.moviepy.codec,
-            }
+        # Add provider-specific config if present
+        if video_config.config and video_config.provider.lower() == "moviepy":
+            result["moviepy"] = video_config.config
 
         return result
 

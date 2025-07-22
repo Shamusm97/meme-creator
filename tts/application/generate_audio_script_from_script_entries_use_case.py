@@ -10,10 +10,14 @@ from tts.domain.models import (
     OutputFormat,
 )
 from tts.application.tts_service_factory import TTSServiceFactory
+from tts.infrastructure.audio_script_repository import AudioScriptRepository
 
 
-class GenerateSpeechFromEntriesUseCase:
+class GenerateAudioScriptFromScriptEntriesUseCase:
     """Use case for converting script entries to speech audio files."""
+
+    def __init__(self, audio_script_repository: AudioScriptRepository = None):
+        self.audio_script_repository = audio_script_repository or AudioScriptRepository()
 
     def execute(
         self,
@@ -30,11 +34,8 @@ class GenerateSpeechFromEntriesUseCase:
             output_dir: Directory to save audio files
 
         Returns:
-            SpeechScript with audio files and timing information
+            AudioScript with audio files and timing information
         """
-        # Create output directory
-        output_dir.mkdir(parents=True, exist_ok=True)
-
         # Create TTS service
         tts_service = TTSServiceFactory.create_service(tts_config)
 
@@ -44,6 +45,13 @@ class GenerateSpeechFromEntriesUseCase:
         # Generate speech with helpful error context
         try:
             speech_script = tts_service.synthesize_script(tts_requests, output_dir)
+
+            # Save metadata using repository
+            metadata_json_path = output_dir / "audio_script.json"
+            self.audio_script_repository.save_audio_script_metadata(
+                speech_script, metadata_json_path
+            )
+
             return speech_script
         except Exception as e:
             # Provide helpful context for TTS errors

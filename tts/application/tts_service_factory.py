@@ -2,7 +2,10 @@
 
 from config.domain.models import TTSConfig
 from tts.domain.models import TTSService
-from tts.infrastructure.chatterbox import ChatterboxTTSClient
+from tts.infrastructure.chatterbox_client import (
+    ChatterboxTTSClient,
+    ChatterboxTTSConfig,
+)
 
 
 class TTSServiceFactory:
@@ -14,8 +17,8 @@ class TTSServiceFactory:
         provider = tts_config.provider.lower()
 
         if provider == "chatterbox":
-            chatterbox_config = tts_config.get_provider_config()
+            # Create provider-specific config from generic config dict
+            chatterbox_config = ChatterboxTTSConfig(**tts_config.config)
             return ChatterboxTTSClient(chatterbox_config)
         else:
             raise ValueError(f"Unsupported TTS provider: {provider}")
-

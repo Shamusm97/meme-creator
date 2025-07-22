@@ -1,19 +1,16 @@
 from pathlib import Path
-from typing import List
 
 from config.domain.models import ScriptConfig
 from config.infrastructure.json import ConfigurationLoader
-from script.domain.models import ScriptEntry
-from script.infrastructure.script_entries_repository import ScriptEntriesRepository
+from script.domain.models import Script
+from script.infrastructure.script_repository import ScriptRepository
 from script.application.llm_client_factory import LLMClientFactory
 
 
 class ScriptGenerationUseCase:
     """Use case for generating scripts from project configuration."""
 
-    def execute_and_save(
-        self, script_config: ScriptConfig, output_dir: Path
-    ) -> List[ScriptEntry]:
+    def execute_and_save(self, script_config: ScriptConfig, output_dir: Path) -> Script:
         """
         Generate script from ScriptConfig and save to files.
 
@@ -33,7 +30,7 @@ class ScriptGenerationUseCase:
 
         # Save script entries as structured JSON
         script_json_file = output_dir / "script_entries.json"
-        script_repository = ScriptEntriesRepository()
+        script_repository = ScriptRepository()
         script_repository.save_to_json_file(script_entries, script_json_file)
 
         return script_entries
@@ -97,4 +94,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

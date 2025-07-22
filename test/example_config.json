@@ -1,33 +1,35 @@
 {
-  "project_name": "Family Guy Meme Creator",
-  "base_output_dir": "output",
+  "project_name": "Peter_Stewie_Test2",
+  "base_output_dir": "/home/mckeowns/memes/projects/",
   "characters": [
     {
       "name": "Peter",
       "speaking_style": "casual",
       "conversational_role": "answerer",
-      "image_path": "assets/peter.png",
+      "image_path": "/home/mckeowns/memes/assets/peter.png",
       "tts_voice_clone": "peter.mp3",
       "tts_voice_predefined": "",
-      "tts_voice_profile": "EXPRESSIVE_MONOLOGUE"
+      "tts_voice_profile": "EXPRESSIVE_MONOLOGUE",
+      "tts_voice_profile_overrides": {}
     },
     {
       "name": "Stewie",
       "speaking_style": "sarcastic",
       "conversational_role": "questioner",
-      "image_path": "assets/stewie.png",
+      "image_path": "/home/mckeowns/memes/assets/stewie.png",
       "tts_voice_clone": "stewie.mp3",
       "tts_voice_predefined": "",
-      "tts_voice_profile": "EXPRESSIVE_MONOLOGUE"
+      "tts_voice_profile": "EXPRESSIVE_MONOLOGUE",
+      "tts_voice_profile_overrides": {}
     }
   ],
   "script": {
-    "overall_conversation_style": "humorous",
-    "main_topic": "Family Guy Episode Dialogue",
-    "scenario": "A typical Family Guy scene where Peter and Stewie are discussing a new invention.",
-    "dialogue_length": "5-7 lines",
-    "system_prompt_extra": "",
-    "user_prompt_extra": "",
+    "overall_conversation_style": "dark/humorous",
+    "main_topic": "Smart meter health risks in 2024-2025",
+    "scenario": "A serious, insightful, and jarring conversation between two characters, where one gaslights the other into believing false claims that smart utility meters (e.g., for electricity or water) installed in 2024-2025 are causing health issues like headaches or fatigue, despite evidence showing they emit safe, non-ionizing radiation.",
+    "dialogue_length": "10-12 lines",
+    "system_prompt_extra": "Craft a dialogue that uses dark humor and edgy tone to gaslight the skeptic, making them doubt their understanding of smart meter safety. Use manipulative tactics like dismissing scientific studies, emotional appeals, and contradictory narratives to push the false claim of health risks.",
+    "user_prompt_extra": "Ensure the conversation is funny and edgy. Use expletives as necessary to amplify the tone. The gaslighting character should be sly and persistent, while the skeptic starts confident but begins to falter. Keep the topic niche and obscure to avoid deeply entrenched opinions, focusing on a lesser-debated issue.",
     "llm": {
       "provider": "gemini",
       "api_key": "",
@@ -53,11 +55,21 @@
   },
   "video": {
     "provider": "moviepy",
-    "background_video": "assets/background.mp4",
+    "background_video": "/home/mckeowns/memes/assets/output.mp4",
     "moviepy": {
       "quality": "medium",
       "fps": 30,
-      "codec": "libx264"
+      "codec": "h264_amf",
+      "subtitles": {
+        "enabled": true,
+        "font_name": "/home/mckeowns/memes/assets/static/Roboto-Var.ttf",
+        "font_size": 48,
+        "font_color": "white",
+        "stroke_color": "black",
+        "stroke_width": 2,
+        "position": "bottom",
+        "margin": 50
+      }
     }
   }
 }

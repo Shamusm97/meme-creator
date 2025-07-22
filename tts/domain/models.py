@@ -5,6 +5,7 @@ from typing import List, Optional
 from enum import Enum
 
 from config.domain.models import Character
+from script.domain.models import Script, ScriptEntry
 
 
 @dataclass
@@ -49,8 +50,7 @@ class OutputFormat(Enum):
 class TTSRequest:
     """Domain model for text-to-speech requests."""
 
-    text: str
-    character: Character
+    script_entry: ScriptEntry
     voice_mode: VoiceMode = field(default=VoiceMode.PREDEFINED)
     predefined_voice_id: Optional[str] = field(default=None)
     reference_audio_filename: Optional[str] = field(default=None)
@@ -60,8 +60,8 @@ class TTSRequest:
     voice_profile: Optional[VoiceProfile] = field(default=None)
 
     def __post_init__(self):
-        if not self.text.strip():
-            raise ValueError("Text cannot be empty")
+        if not self.script_entry.content.strip():
+            raise ValueError("Script entry content cannot be empty")
 
         if self.voice_mode == VoiceMode.PREDEFINED and not self.predefined_voice_id:
             raise ValueError(
@@ -82,16 +82,15 @@ class AudioFile:
     """Domain model representing an audio file."""
 
     path: Path
-    character: Character
-    dialogue: str
+    script_entry: Optional[ScriptEntry] = field(default=None)
     duration_seconds: Optional[float] = field(default=None)
     file_size_bytes: Optional[int] = field(default=None)
 
     def __post_init__(self):
         if not self.path.exists():
             raise ValueError(f"Audio file does not exist: {self.path}")
-        if not self.dialogue.strip():
-            raise ValueError("Dialogue cannot be empty")
+        if self.script_entry and not self.script_entry.content.strip():
+            raise ValueError("Script entry content cannot be empty")
 
 
 @dataclass
@@ -99,27 +98,34 @@ class AudioScript:
     """Domain model for a complete speech script with timing."""
 
     audio_files: List[AudioFile] = field(default_factory=list)
-    total_duration_seconds: float = field(default=0.0)
+    source_script: Optional[Script] = field(default=None)
 
     def add_audio_file(self, audio_file: AudioFile) -> None:
         """Add an audio file to the script."""
         self.audio_files.append(audio_file)
-        if audio_file.duration_seconds:
-            self.total_duration_seconds += audio_file.duration_seconds
 
     def get_characters(self) -> List[Character]:
         """Get unique characters in the script."""
         seen_names = set()
         unique_characters = []
         for af in self.audio_files:
-            if af.character.name not in seen_names:
-                seen_names.add(af.character.name)
-                unique_characters.append(af.character)
+            if af.script_entry and af.script_entry.character.name not in seen_names:
+                seen_names.add(af.script_entry.character.name)
+                unique_characters.append(af.script_entry.character)
         return unique_characters
 
     def get_files_by_character(self, character: Character) -> List[AudioFile]:
         """Get all audio files for a specific character."""
-        return [af for af in self.audio_files if af.character == character]
+        return [
+            af
+            for af in self.audio_files
+            if af.script_entry and af.script_entry.character == character
+        ]
+
+    @property
+    def total_duration_seconds(self) -> float:
+        """Calculate total duration of all audio files."""
+        return sum(af.duration_seconds or 0 for af in self.audio_files)
 
 
 class TTSService(ABC):

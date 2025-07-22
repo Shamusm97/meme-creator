@@ -1,11 +1,10 @@
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Optional, Union, List
 from enum import Enum
 from pathlib import Path
 import time
 import requests
 
-from config.domain.models import ChatterboxTTSConfig
 from tts.domain.models import (
     VoiceProfile,
     TTSRequest,
@@ -13,6 +12,22 @@ from tts.domain.models import (
     AudioFile,
     AudioScript,
 )
+from tts.infrastructure.tts_file_service import TTSFileService
+
+
+@dataclass
+class ChatterboxTTSConfig:
+    """Configuration specific to Chatterbox TTS provider"""
+
+    base_url: str
+    endpoint: str = field(default="/tts")
+    timeout: int = field(default=120)
+
+    def __post_init__(self):
+        if not self.base_url.strip():
+            raise ValueError("Base URL cannot be empty")
+        if self.timeout <= 0:
+            raise ValueError("Timeout must be positive")
 
 
 class CHATTERBOX_VOICE_PROFILES(Enum):
@@ -136,63 +151,55 @@ class ChatterboxTTSClient(TTSService):
     Chatterbox implementation of TTSService.
     """
 
-    def __init__(self, config: ChatterboxTTSConfig):
+    def __init__(self, config: ChatterboxTTSConfig, tts_file_service: TTSFileService = None):
         """
         Initialize Chatterbox TTS Client.
 
         Args:
             config: Chatterbox TTS configuration
+            tts_file_service: Service for handling file operations
         """
         self.config = config
         self.base_url = config.base_url.rstrip("/")
         self.tts_endpoint = f"{self.base_url}{config.endpoint}"
         self.timeout = config.timeout
         self.session = requests.Session()
+        self.file_service = tts_file_service or TTSFileService()
 
     def synthesize(self, request: TTSRequest, output_dir: Path) -> AudioFile:
         """Synthesize speech for a single request."""
+        # Ensure output directory exists
+        self.file_service.create_output_directory(output_dir)
+        
         chatterbox_request = ChatterboxTTSRequest.from_domain_request(request)
         response = self._synthesize_to_stream(chatterbox_request)
 
-        # Create filename for this request
-        filename = f"{request.character.name.lower().replace(' ', '_')}.{request.output_format.value}"
+        # Generate filename using file service
+        filename = self.file_service.generate_filename(
+            request.character, output_format=request.output_format
+        )
         output_path = output_dir / filename
 
-        save_result = self._save_stream_to_file(response, output_path)
-
-        if not save_result["success"]:
-            raise Exception(f"Failed to save audio file: {save_result['error']}")
-
-        # Estimate duration (rough calculation)
-        words = len(request.text.split())
-        estimated_duration = (words / 150) * 60  # 150 words per minute
-
-        return AudioFile(
-            path=output_path,
-            character=request.character,
-            dialogue=request.text,
-            duration_seconds=estimated_duration,
-            file_size_bytes=save_result["file_size_bytes"],
+        # Save using file service
+        return self.file_service.save_audio_stream_to_file(
+            response, output_path, request.character, request.text
         )
 
     def synthesize_script(
         self, requests: List[TTSRequest], output_dir: Path
     ) -> AudioScript:
         """Synthesize speech for multiple requests."""
-        output_dir.mkdir(parents=True, exist_ok=True)
+        self.file_service.create_output_directory(output_dir)
         speech_script = AudioScript()
 
         for i, request in enumerate(requests):
-            # Create unique filename with index prefix
-            filename = f"{i:03d}_{request.character.name.lower().replace(' ', '_')}.{request.output_format.value}"
-            output_dir = output_dir  # Use the base directory directly
-
-            # Update the request to synthesize to the correct path
+            # Synthesize to temporary location
             audio_file = self.synthesize(request, output_dir)
 
-            # Rename the file to include the index prefix
-            indexed_path = output_dir / filename
-            audio_file.path.rename(indexed_path)
+            # Rename with index prefix using file service
+            indexed_path = self.file_service.rename_file_with_index(
+                audio_file.path, i, request.character, request.output_format
+            )
 
             # Update the audio file path
             audio_file = AudioFile(
@@ -271,45 +278,6 @@ class ChatterboxTTSClient(TTSService):
                 f"Failed to connect to TTS server at {self.tts_endpoint}: {str(e)}"
             )
 
-    def _save_stream_to_file(
-        self, response: requests.Response, output_path: Union[str, Path]
-    ) -> dict:
-        """
-        Save streaming response to file.
-
-        Args:
-            response: Streaming response from synthesize_to_stream()
-            output_path: Path where to save the audio file
-
-        Returns:
-            Dictionary with save info
-        """
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        start_time = time.time()
-        total_bytes = 0
-
-        try:
-            with open(output_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        total_bytes += len(chunk)
-
-            return {
-                "success": True,
-                "output_path": str(output_path),
-                "file_size_bytes": total_bytes,
-                "save_time_seconds": time.time() - start_time,
-            }
-
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "save_time_seconds": time.time() - start_time,
-            }
 
     def _synthesize_to_file(
         self, request: ChatterboxTTSRequest, output_path: Union[str, Path]

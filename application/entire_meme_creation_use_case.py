@@ -1,13 +1,13 @@
-"""Complete meme creation use case orchestrating all domains."""
-
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from config.domain.models import ProjectConfig
 from config.infrastructure.json import ConfigurationLoader
 from script.application.generate_script_use_case import ScriptGenerationUseCase
-from tts.application.generate_speech_from_entries_use_case import GenerateSpeechFromEntriesUseCase
 from tts.application.merge_audio_script_use_case import MergeAudioScriptUseCase
+from tts.application.generate_audio_script_from_script_entries_use_case import (
+    GenerateAudioScriptFromScriptEntriesUseCase,
+)
 from video.application.create_video_use_case import CreateVideoUseCase
 from script.domain.models import ScriptEntry
 from tts.domain.models import AudioScript, AudioFile
@@ -19,7 +19,7 @@ class MemeCreationUseCase:
 
     def __init__(self):
         self.script_use_case = ScriptGenerationUseCase()
-        self.tts_use_case = GenerateSpeechFromEntriesUseCase()
+        self.tts_use_case = GenerateAudioScriptFromScriptEntriesUseCase()
         self.merge_use_case = MergeAudioScriptUseCase()
         self.video_use_case = CreateVideoUseCase()
 
@@ -55,14 +55,14 @@ class MemeCreationUseCase:
         video_output_dir = project_dir / "videos"
 
         # Step 1: Generate script
-        script_entries = self.script_use_case.execute_and_save(
+        script = self.script_use_case.execute_and_save(
             script_config=project_config.script_config,
             output_dir=script_output_dir,
         )
 
         # Step 2: Generate TTS from script
         audio_script = self.tts_use_case.execute(
-            script_entries=script_entries,
+            script_entries=script.entries,
             tts_config=project_config.tts_config,
             output_dir=tts_output_dir,
         )
@@ -70,26 +70,33 @@ class MemeCreationUseCase:
         # Step 3: Optionally merge audio files
         merged_audio_file = None
         if merge_audio and audio_script.audio_files:
-            merged_output_path = project_dir / f"{project_config.project_name}_merged.wav"
+            merged_output_path = (
+                project_dir / f"{project_config.project_name}_merged.wav"
+            )
             merged_audio_file = self.merge_use_case.execute(
                 audio_script=audio_script,
                 output_path=merged_output_path,
                 delay_between_files=delay_between_files,
+                show_progress=True,
             )
 
-        # Step 4: Create video
+        # Step 4: Create video with subtitles from TTS metadata
         video_output_path = video_output_dir / f"{project_config.project_name}_meme.mp4"
+        tts_metadata_json = tts_output_dir / "audio_script.json"
         video_file = self.video_use_case.execute(
             audio_script=audio_script,
             video_config=project_config.video_config,
             output_path=video_output_path,
+            show_progress=True,
         )
 
         # Create summary file
         summary_file = project_dir / f"{project_config.project_name}_meme_summary.txt"
-        self._create_summary_file(summary_file, script_entries, audio_script, merged_audio_file, video_file)
+        self._create_summary_file(
+            summary_file, script.entries, audio_script, merged_audio_file, video_file
+        )
 
-        return script_entries, audio_script, merged_audio_file, video_file
+        return script.entries, audio_script, merged_audio_file, video_file
 
     def _create_summary_file(
         self,
@@ -106,7 +113,9 @@ class MemeCreationUseCase:
             f.write("# Complete Meme Creation Summary\n\n")
             f.write(f"Generated: {len(script_entries)} script entries\n")
             f.write(f"Audio Files: {len(audio_script.audio_files)}\n")
-            f.write(f"Total Duration: {audio_script.total_duration_seconds:.2f} seconds\n")
+            f.write(
+                f"Total Duration: {audio_script.total_duration_seconds:.2f} seconds\n"
+            )
             f.write(f"Characters: {', '.join(characters)}\n\n")
 
             f.write("## Script Files\n")
@@ -120,17 +129,28 @@ class MemeCreationUseCase:
             if merged_audio_file:
                 f.write(f"\n## Merged Audio\n")
                 f.write(f"- {merged_audio_file.path.name}\n")
-                f.write(f"- Total Duration: {merged_audio_file.duration_seconds:.2f} seconds\n")
-                f.write(f"- File Size: {merged_audio_file.file_size_bytes / 1024 / 1024:.2f} MB\n")
+                f.write(
+                    f"- Total Duration: {merged_audio_file.duration_seconds:.2f} seconds\n"
+                )
+                f.write(
+                    f"- File Size: {merged_audio_file.file_size_bytes / 1024 / 1024:.2f} MB\n"
+                )
 
-            f.write(f"\n## Video\n")
+            f.write(f"\n## Video (with Subtitles)\n")
             f.write(f"- {video_file.path.name}\n")
             f.write(f"- File Size: {video_file.file_size_bytes / 1024 / 1024:.2f} MB\n")
             if video_file.render_time_seconds:
-                f.write(f"- Render Time: {video_file.render_time_seconds:.2f} seconds\n")
+                f.write(
+                    f"- Render Time: {video_file.render_time_seconds:.2f} seconds\n"
+                )
+            f.write(f"\n## TTS Metadata\n")
+            f.write(f"- audio_script.json (timing + metadata for subtitles)\n")
 
     def execute_and_save_all(
-        self, config_path: Path, merge_audio: bool = True, delay_between_files: float = 0.0
+        self,
+        config_path: Path,
+        merge_audio: bool = True,
+        delay_between_files: float = 0.0,
     ) -> Tuple[List[ScriptEntry], AudioScript, Optional[AudioFile], VideoFile]:
         """
         Execute complete meme creation with comprehensive output files and metadata.
@@ -168,7 +188,9 @@ def main():
         project_config = ConfigurationLoader.load_from_file(config_path)
 
         use_case = MemeCreationUseCase()
-        script_entries, audio_script, merged_audio, video_file = use_case.execute_and_save_all(config_path)
+        script_entries, audio_script, merged_audio, video_file = (
+            use_case.execute_and_save_all(config_path)
+        )
 
         print(f"Complete Meme Creation Results for: {project_config.project_name}")
         print("=" * 60)
@@ -222,4 +244,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
